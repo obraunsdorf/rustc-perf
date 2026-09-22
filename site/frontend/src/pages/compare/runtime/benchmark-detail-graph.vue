@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed, onMounted, Ref, ref} from "vue";
+import {computed, onMounted, Ref, ref, watch} from "vue";
 import {GraphKind, GraphsSelector, RuntimeGraphData} from "../../../graph/data";
 import {GraphRenderOpts, renderRuntimePlots} from "../../../graph/render";
 import uPlot from "uplot";
@@ -10,7 +10,7 @@ import {
   getPastDate,
 } from "../compile/table/utils";
 import {ArtifactDescription} from "../types";
-import {RuntimeTestCase} from "./common";
+import {GraphRangeMode, RuntimeTestCase} from "./common";
 import {
   RUNTIME_DETAIL_GRAPHS_RESOLVER,
   RuntimeDetailGraphs,
@@ -22,9 +22,13 @@ const props = defineProps<{
   metric: string;
   artifact: ArtifactDescription;
   baseArtifact: ArtifactDescription;
+  // The `start` bound from the page-level comparison selector (commit, date,
+  // or "" for none). Used by the "since start" range mode.
+  startBound: string;
+  rangeMode: GraphRangeMode;
 }>();
 
-// How many days are shown in the graph
+// How many days are shown in the graph in "days" range mode
 const DAY_RANGE = 30;
 
 function createGraphsSelector(): RuntimeDetailGraphsSelector {
@@ -119,6 +123,9 @@ async function renderGraph(
     drawCurrentDate(opts, date);
   }
 
+  // Remove the previously rendered chart, if any, so re-rendering after a
+  // range mode change doesn't stack multiple plots on top of each other.
+  chartRef.value.innerHTML = "";
   renderRuntimePlots(graphData, selector, chartRef.value, opts);
 }
 
@@ -128,6 +135,9 @@ async function loadGraphs(): Promise<RuntimeDetailGraphs> {
 
 function getGraphTitle() {
   const {start, end, date} = graphRange.value;
+  if (props.rangeMode === "since-start") {
+    return start ? `History since ${start}` : "Full history";
+  }
   const days = date
     ? daysBetweenDates(new Date(start), new Date(end))
     : DAY_RANGE;
@@ -176,8 +186,21 @@ function drawCurrentDate(opts: GraphRenderOpts, date: Date) {
  */
 function getGraphRange(
   artifact: ArtifactDescription,
-  baseArtifact: ArtifactDescription
+  baseArtifact: ArtifactDescription,
+  mode: GraphRangeMode,
+  startBound: string
 ): GraphRange {
+  if (mode === "since-start") {
+    // Use the page-level `start` bound verbatim: empty means "no bound",
+    // i.e. show the full history. No upper bound, so the graph always
+    // extends up to the latest available data.
+    return {
+      start: startBound,
+      end: "",
+      date: artifact.type === "try" ? null : new Date(artifact.date),
+    };
+  }
+
   // If this is a try commit, we don't know its future, so always we just display
   // the last `DAY_RANGE` days.
   if (artifact.type === "try") {
@@ -224,14 +247,22 @@ function getGraphRange(
 const relativeToPreviousChartElement: Ref<HTMLElement | null> = ref(null);
 const relativeToFirstChartElement: Ref<HTMLElement | null> = ref(null);
 const graphRange = computed(() =>
-  getGraphRange(props.artifact, props.baseArtifact)
+  getGraphRange(
+    props.artifact,
+    props.baseArtifact,
+    props.rangeMode,
+    props.startBound
+  )
 );
 
-onMounted(() => {
+function refreshGraphs() {
   loadGraphs().then((d) => {
     renderGraphs(d);
   });
-});
+}
+
+onMounted(refreshGraphs);
+watch(() => props.rangeMode, refreshGraphs);
 </script>
 
 <template>

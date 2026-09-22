@@ -2,7 +2,7 @@
 import {TestCaseComparison} from "../data";
 import Tooltip from "../tooltip.vue";
 import {formatTarget, percentClass} from "../shared";
-import {RuntimeTestCase} from "./common";
+import {GraphRangeMode, RuntimeTestCase} from "./common";
 import {computed} from "vue";
 import Accordion from "../../../components/accordion.vue";
 import {testCaseKey} from "./common";
@@ -16,6 +16,8 @@ const props = defineProps<{
   metric: string;
   commitA: ArtifactDescription;
   commitB: ArtifactDescription;
+  startBound: string;
+  rangeMode: GraphRangeMode;
 }>();
 
 function prettifyRawNumber(number: number): string {
@@ -82,7 +84,10 @@ const unit = computed(() => {
       </thead>
       <tbody>
         <template v-for="comparison in comparisons">
-          <Accordion :id="testCaseKey(comparison.testCase)">
+          <Accordion
+            :id="testCaseKey(comparison.testCase)"
+            :default-expanded="true"
+          >
             <template v-slot:default>
               <td>
                 {{ comparison.testCase.benchmark }}
@@ -139,6 +144,8 @@ const unit = computed(() => {
                   :artifact="commitB"
                   :metric="metric"
                   :testCase="comparison.testCase"
+                  :startBound="startBound"
+                  :rangeMode="rangeMode"
                 />
               </td>
             </template>

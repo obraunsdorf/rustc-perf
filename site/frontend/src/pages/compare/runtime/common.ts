@@ -9,6 +9,11 @@ export interface RuntimeTestCase {
   target: Target;
 }
 
+// How a runtime benchmark's history graph picks its date range: either a
+// fixed rolling window, or everything from the comparison's `start` bound
+// onwards.
+export type GraphRangeMode = "days" | "since-start";
+
 export type RuntimeBenchmarkFilter = {
   target: Target[];
 } & BenchmarkFilter;

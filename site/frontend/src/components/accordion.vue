@@ -2,11 +2,21 @@
 import {computed} from "vue";
 import {useExpandedStore} from "../utils/expansion";
 
-const props = defineProps<{
-  id: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    id: string;
+    defaultExpanded?: boolean;
+  }>(),
+  {
+    defaultExpanded: false,
+  }
+);
 
-const {toggleExpanded, isExpanded} = useExpandedStore();
+const {toggleExpanded, isExpanded, setExpanded} = useExpandedStore();
+
+if (props.defaultExpanded) {
+  setExpanded(props.id, true);
+}
 
 const expanded = computed(() => isExpanded(props.id));
 </script>

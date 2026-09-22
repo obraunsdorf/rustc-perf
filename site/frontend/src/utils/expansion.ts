@@ -15,5 +15,13 @@ export function useExpandedStore() {
     }
   }
 
-  return {toggleExpanded, isExpanded};
+  function setExpanded(key: String, value: boolean) {
+    if (value) {
+      expanded.value.add(key);
+    } else {
+      expanded.value.delete(key);
+    }
+  }
+
+  return {toggleExpanded, isExpanded, setExpanded};
 }

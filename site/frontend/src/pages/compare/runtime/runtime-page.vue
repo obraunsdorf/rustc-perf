@@ -6,6 +6,7 @@ import {computeSummary, filterNonRelevant} from "../data";
 import {
   computeRuntimeComparisonsWithNonRelevant,
   defaultRuntimeFilter,
+  GraphRangeMode,
   RuntimeBenchmarkFilter,
 } from "./common";
 import MetricSelector from "../metric-selector.vue";
@@ -103,6 +104,7 @@ const urlParams = getUrlParams();
 
 const quickLinksKey = ref(0);
 const filter = ref(loadFilterFromUrl(urlParams, defaultRuntimeFilter));
+const rangeMode = ref<GraphRangeMode>("since-start");
 
 const allComparisons = computed(() =>
   computeRuntimeComparisonsWithNonRelevant(
@@ -134,6 +136,17 @@ const filteredSummary = computed(() => computeSummary(comparisons.value));
     Runtime benchmarks are currently experimental and the results might be quite
     unstable/noisy. Please take this into account!
   </div>
+  <div class="range-mode-selector">
+    History graphs:
+    <label>
+      <input type="radio" value="since-start" v-model="rangeMode" />
+      Since start commit
+    </label>
+    <label>
+      <input type="radio" value="days" v-model="rangeMode" />
+      30-day window
+    </label>
+  </div>
   <ComparisonsTable
     :comparisons="comparisons"
     :has-non-relevant="allComparisons.length > 0"
@@ -141,6 +154,8 @@ const filteredSummary = computed(() => computeSummary(comparisons.value));
     :metric="selector.stat"
     :commitA="data.a"
     :commitB="data.b"
+    :startBound="selector.start"
+    :rangeMode="rangeMode"
   />
 </template>
 
@@ -149,5 +164,12 @@ const filteredSummary = computed(() => computeSummary(comparisons.value));
   margin: 5px 0;
   text-align: center;
   font-weight: bold;
+}
+
+.range-mode-selector {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  margin-bottom: 10px;
 }
 </style>
