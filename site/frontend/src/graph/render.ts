@@ -87,7 +87,7 @@ function tooltipPlugin({
       trailer = uPlot.fmtNum(u.data[seriesIdx][dataIdx]) + "% since start";
     }
     tooltip.textContent =
-      fmtDate(new Date(u.data[0][dataIdx] * 1e3)) +
+      fmtDate(new Date(commits[dataIdx][0] * 1e3)) +
       " - " +
       commits[dataIdx][1].slice(0, 10) +
       "\n" +
@@ -260,6 +260,19 @@ function wheelZoomPlugin(opts) {
   };
 }
 
+// X axis that places commits equally spaced by their index instead of by
+// their date, labelled with the commit dates.
+function commitIndexAxis(commits: Array<[number, string]>) {
+  const fmtDate = uPlot.fmtDate("{M}/{D}");
+  return {
+    incrs: [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000],
+    values: (_self, splits: number[]) =>
+      splits.map((i) =>
+        commits[i] ? fmtDate(new Date(commits[i][0] * 1e3)) : ""
+      ),
+  };
+}
+
 function genPlotOpts({
   width,
   height,
@@ -272,6 +285,7 @@ function genPlotOpts({
   prox = 5,
   absoluteMode,
   hooks,
+  equallySpacedCommits = false,
 }) {
   return {
     width,
@@ -293,6 +307,9 @@ function genPlotOpts({
       },
     },
     scales: {
+      x: {
+        time: !equallySpacedCommits,
+      },
       y: {
         range: (_self, dataMin, dataMax) =>
           uPlot.rangeNum(absoluteMode ? 0 : dataMin, dataMax, 0.2, true),
@@ -303,6 +320,7 @@ function genPlotOpts({
         grid: {
           show: false,
         },
+        ...(equallySpacedCommits ? commitIndexAxis(commits) : {}),
       },
       {
         label: yAxisLabel,
@@ -591,7 +609,7 @@ export function renderRuntimePlots(
 
     let seriesOpts = [{}];
 
-    let xVals = data.commits.map((c) => c[0]);
+    let xVals = data.commits.map((_c, idx) => idx);
 
     let plotData = [xVals];
 
@@ -622,6 +640,7 @@ export function renderRuntimePlots(
       },
       absoluteMode: selector.kind == "raw",
       hooks,
+      equallySpacedCommits: true,
     });
     if (renderTitle) {
       plotOpts["title"] = `${benchName}`;

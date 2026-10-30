@@ -120,7 +120,7 @@ async function renderGraph(
     renderTitle: false,
   };
   if (date !== null) {
-    drawCurrentDate(opts, date);
+    drawCurrentDate(opts, graphData.commits, date);
   }
 
   // Remove the previously rendered chart, if any, so re-rendering after a
@@ -156,14 +156,21 @@ type GraphRange = {
 };
 
 /**
- * Hook into the uPlot drawing machinery to draw a rectangle from the `date` to
- * the end of the plot, representing the region that is the date's future.
+ * Hook into the uPlot drawing machinery to draw a rectangle from the last
+ * commit at or before `date` to the end of the plot, representing the region
+ * that is the date's future. The x axis is indexed by commit, not by time.
  */
-function drawCurrentDate(opts: GraphRenderOpts, date: Date) {
+function drawCurrentDate(
+  opts: GraphRenderOpts,
+  commits: Array<[number, string]>,
+  date: Date
+) {
+  const dateIdx =
+    commits.filter(([time]) => time <= date.getTime() / 1000).length - 1;
   opts.hooks = {
     drawSeries: (u: uPlot) => {
       let ctx = u.ctx;
-      const x = u.valToPos(date.getTime() / 1000, "x", true);
+      const x = u.valToPos(dateIdx, "x", true);
 
       // Ignore if the width is negative
       const width = u.bbox.width - x + u.bbox.left;
