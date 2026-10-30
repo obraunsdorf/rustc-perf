@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Context;
 use tempfile::TempDir;
@@ -142,11 +143,17 @@ impl BenchmarkSuiteCompilation {
 #[derive(Default)]
 pub struct RuntimeCompilationOpts {
     debug_info: Option<String>,
+    parallel: bool,
 }
 
 impl RuntimeCompilationOpts {
     pub fn debug_info(mut self, debug_info: &str) -> Self {
         self.debug_info = Some(debug_info.to_string());
+        self
+    }
+
+    pub fn parallel(mut self, parallel: bool) -> Self {
+        self.parallel = parallel;
         self
     }
 }
@@ -182,36 +189,41 @@ pub fn prepare_runtime_benchmark_suite(
     };
 
     let group_count = benchmark_crates.len();
-    println!("Compiling {group_count} runtime benchmark group(s)");
+
+    // Make sure that Cargo.lock isn't changed by the build if we're running in isolated mode
+    let _guards = match isolation_mode {
+        CargoIsolationMode::Cached => vec![],
+        CargoIsolationMode::Isolated => benchmark_crates
+            .iter()
+            .map(|krate| {
+                EnsureImmutableFile::new(&krate.path.join("Cargo.lock"), krate.name.clone())
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?,
+    };
+
+    let target_dir = temp_dir.as_ref().map(|d| d.path());
+    let results: Vec<anyhow::Result<BenchmarkGroup>> = if opts.parallel {
+        println!("Compiling {group_count} runtime benchmark group(s) in parallel");
+        compile_groups_in_parallel(toolchain, &benchmark_crates, target_dir, &opts)
+    } else {
+        println!("Compiling {group_count} runtime benchmark group(s)");
+        benchmark_crates
+            .iter()
+            .enumerate()
+            .map(|(index, benchmark_crate)| {
+                println!(
+                    "Compiling {:<22} ({}/{group_count})",
+                    format!("`{}`", benchmark_crate.name),
+                    index + 1
+                );
+                compile_benchmark_group(toolchain, benchmark_crate, target_dir, &opts)
+            })
+            .collect()
+    };
 
     let mut groups = Vec::new();
     let mut failed_to_compile = HashMap::new();
-    for (index, benchmark_crate) in benchmark_crates.into_iter().enumerate() {
-        println!(
-            "Compiling {:<22} ({}/{group_count})",
-            format!("`{}`", benchmark_crate.name),
-            index + 1
-        );
-
-        let target_dir = temp_dir.as_ref().map(|d| d.path());
-
-        // Make sure that Cargo.lock isn't changed by the build if we're running in isolated mode
-        let _guard = match isolation_mode {
-            CargoIsolationMode::Cached => None,
-            CargoIsolationMode::Isolated => Some(EnsureImmutableFile::new(
-                &benchmark_crate.path.join("Cargo.lock"),
-                benchmark_crate.name.clone(),
-            )?),
-        };
-        let result = start_cargo_build(toolchain, &benchmark_crate.path, target_dir, &opts)
-            .with_context(|| {
-                anyhow::anyhow!("Cannot start compilation of {}", benchmark_crate.name)
-            })
-            .and_then(|iter| {
-                parse_benchmark_group(iter, &benchmark_crate.name).with_context(|| {
-                    anyhow::anyhow!("Cannot compile runtime benchmark {}", benchmark_crate.name)
-                })
-            });
+    for (benchmark_crate, result) in benchmark_crates.iter().zip(results) {
         match result {
             Ok(group) => groups.push(group),
             Err(error) => {
@@ -261,6 +273,64 @@ fn check_duplicates(groups: &[BenchmarkGroup]) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Compiles all groups concurrently. Each group gets its own subdirectory of `target_dir`, because
+/// concurrent Cargo invocations on a shared target directory would serialize on its build lock.
+fn compile_groups_in_parallel(
+    toolchain: &Toolchain,
+    benchmark_crates: &[BenchmarkGroupCrate],
+    target_dir: Option<&Path>,
+    opts: &RuntimeCompilationOpts,
+) -> Vec<anyhow::Result<BenchmarkGroup>> {
+    let finished = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = benchmark_crates
+            .iter()
+            .map(|benchmark_crate| {
+                let target_dir = target_dir.map(|d| d.join(&benchmark_crate.name));
+                let finished = &finished;
+                scope.spawn(move || {
+                    let result = compile_benchmark_group(
+                        toolchain,
+                        benchmark_crate,
+                        target_dir.as_deref(),
+                        opts,
+                    );
+                    println!(
+                        "Finished {:<22} ({}/{})",
+                        format!("`{}`", benchmark_crate.name),
+                        finished.fetch_add(1, Ordering::Relaxed) + 1,
+                        benchmark_crates.len()
+                    );
+                    result
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .expect("Runtime benchmark compilation thread panicked")
+            })
+            .collect()
+    })
+}
+
+fn compile_benchmark_group(
+    toolchain: &Toolchain,
+    benchmark_crate: &BenchmarkGroupCrate,
+    target_dir: Option<&Path>,
+    opts: &RuntimeCompilationOpts,
+) -> anyhow::Result<BenchmarkGroup> {
+    start_cargo_build(toolchain, &benchmark_crate.path, target_dir, opts)
+        .with_context(|| anyhow::anyhow!("Cannot start compilation of {}", benchmark_crate.name))
+        .and_then(|iter| {
+            parse_benchmark_group(iter, &benchmark_crate.name).with_context(|| {
+                anyhow::anyhow!("Cannot compile runtime benchmark {}", benchmark_crate.name)
+            })
+        })
 }
 
 /// Locates the benchmark binary of a runtime benchmark crate compiled by cargo, and then executes it

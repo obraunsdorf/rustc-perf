@@ -448,6 +448,10 @@ struct RuntimeOptions {
     /// found groups will be compiled.
     #[arg(long)]
     group: Option<String>,
+
+    /// Compile the runtime benchmark groups concurrently, each in its own target directory.
+    #[arg(long)]
+    parallel_compile: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -902,6 +906,7 @@ fn main_result() -> anyhow::Result<i32> {
                 &runtime_benchmark_dir,
                 isolation_mode,
                 runtime.group,
+                RuntimeCompilationOpts::default().parallel(runtime.parallel_compile),
                 &toolchain,
                 &artifact_id,
                 None,
@@ -945,7 +950,9 @@ fn main_result() -> anyhow::Result<i32> {
                     runtime.group.clone(),
                     // Compile with debuginfo to have filenames and line numbers available in the
                     // generated profiles.
-                    RuntimeCompilationOpts::default().debug_info("1"),
+                    RuntimeCompilationOpts::default()
+                        .debug_info("1")
+                        .parallel(runtime.parallel_compile),
                 )?
                 .extract_suite();
                 Ok::<_, anyhow::Error>((toolchain, suite))
@@ -1750,6 +1757,7 @@ async fn create_benchmark_configs(
             &runtime_benchmark_dir(),
             CargoIsolationMode::Isolated,
             None,
+            RuntimeCompilationOpts::default(),
             toolchain,
             artifact_id,
             Some(job.id()),
@@ -2078,6 +2086,7 @@ async fn load_runtime_benchmarks(
     benchmark_dir: &Path,
     isolation_mode: CargoIsolationMode,
     group: Option<String>,
+    opts: RuntimeCompilationOpts,
     toolchain: &Toolchain,
     artifact_id: &ArtifactId,
     job_id: Option<u32>,
@@ -2085,13 +2094,7 @@ async fn load_runtime_benchmarks(
     let BenchmarkSuiteCompilation {
         suite,
         failed_to_compile,
-    } = prepare_runtime_benchmark_suite(
-        toolchain,
-        benchmark_dir,
-        isolation_mode,
-        group,
-        RuntimeCompilationOpts::default(),
-    )?;
+    } = prepare_runtime_benchmark_suite(toolchain, benchmark_dir, isolation_mode, group, opts)?;
 
     record_runtime_compilation_errors(conn, artifact_id, failed_to_compile, job_id).await;
     Ok(suite)
@@ -2209,6 +2212,7 @@ async fn bench_published_artifact(
         dirs.runtime,
         CargoIsolationMode::Isolated,
         None,
+        RuntimeCompilationOpts::default(),
         &toolchain,
         &artifact_id,
         job_id,
